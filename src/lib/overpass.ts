@@ -5,19 +5,48 @@ const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const GLUTEN_FREE_NAME_REGEX =
   /sin\s+tacc|celiaco|celiaca|cel[ií]ac[ao]|gluten[\s-]?free|sin\s+gluten|apto\s+celiaco/i;
 
-const QUERY = `
-[out:json][timeout:60];
-area["name"="Ciudad Autónoma de Buenos Aires"]["boundary"="administrative"]->.caba;
-(
-  node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:gluten_free"="yes"](area.caba);
-  node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:coeliac"="yes"](area.caba);
-  node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"sin tacc|celiaco|celiaca|celíac|gluten free|sin gluten|apto celiaco",i](area.caba);
-  way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:gluten_free"="yes"](area.caba);
-  way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:coeliac"="yes"](area.caba);
-  way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"sin tacc|celiaco|celiaca|celíac|gluten free|sin gluten|apto celiaco",i](area.caba);
-);
-out body center;
-`;
+// OSM area for CABA: relation 3082668 → area ID = 3600000000 + 3082668 = 3603082668
+function buildQuery(): string {
+  return (
+    "[out:json][timeout:60];" +
+    "area(3603082668)->.caba;" +
+    "(" +
+    'node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:gluten_free"="yes"](area.caba);' +
+    'node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:coeliac"="yes"](area.caba);' +
+    'node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"sin tacc",i](area.caba);' +
+    'node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"celiaco|celiaca",i](area.caba);' +
+    'node["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"gluten",i](area.caba);' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:gluten_free"="yes"](area.caba);' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["diet:coeliac"="yes"](area.caba);' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"sin tacc",i](area.caba);' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"celiaco|celiaca",i](area.caba);' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|bakery"]["name"~"gluten",i](area.caba);' +
+    ");" +
+    "out body center;"
+  );
+}
+
+async function runQuery(): Promise<OverpassElement[]> {
+  const body = "data=" + encodeURIComponent(buildQuery());
+
+  const response = await fetch(OVERPASS_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "SinMiga/1.0 (gluten-free restaurant map CABA)",
+      Accept: "application/json",
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Overpass API error: ${response.status} — ${text.slice(0, 200)}`);
+  }
+
+  const data: OverpassResponse = await response.json();
+  return data.elements;
+}
 
 function buildAddress(tags: Record<string, string>): string {
   const parts: string[] = [];
@@ -67,36 +96,22 @@ function elementToRestaurant(el: OverpassElement): Restaurant | null {
 }
 
 export async function fetchGlutenFreeRestaurants(): Promise<Restaurant[]> {
-  const response = await fetch(OVERPASS_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `data=${encodeURIComponent(QUERY)}`,
-    next: { revalidate: 0 },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Overpass API error: ${response.status}`);
-  }
-
-  const data: OverpassResponse = await response.json();
+  const elements = await runQuery();
 
   const seen = new Set<string>();
   const restaurants: Restaurant[] = [];
 
-  for (const el of data.elements) {
+  for (const el of elements) {
     const restaurant = elementToRestaurant(el);
     if (!restaurant) continue;
 
-    // Deduplicate by name + approximate coords
-    const key = `${restaurant.name.toLowerCase()}-${restaurant.lat.toFixed(3)}-${restaurant.lon.toFixed(3)}`;
+    const key = `${restaurant.lat.toFixed(4)}-${restaurant.lon.toFixed(4)}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    // Double-check: must match tag or name pattern
     const hasTag =
       el.tags?.["diet:gluten_free"] === "yes" ||
-      el.tags?.["diet:coeliac"] === "yes" ||
-      el.tags?.["menu:gluten_free"] === "yes";
+      el.tags?.["diet:coeliac"] === "yes";
     const nameMatches = GLUTEN_FREE_NAME_REGEX.test(restaurant.name);
 
     if (hasTag || nameMatches) {
