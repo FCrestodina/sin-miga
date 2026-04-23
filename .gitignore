@@ -40,5 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# data cache (regenerated at runtime)
+# data (regenerated at runtime or user-generated)
 /data/restaurants.json
+/data/confirmations.json

@@ -8,8 +8,28 @@ export interface Restaurant {
   website?: string;
   openingHours?: string;
   cuisine?: string;
-  glutenFreeSource: "tag" | "name" | "menu_tag";
+  glutenFreeSource: "tag" | "name" | "menu_tag" | "community";
   tags: Record<string, string>;
+}
+
+export interface Suggestion {
+  id: string;
+  name: string;
+  address: string;
+  neighborhood?: string;
+  phone?: string;
+  website?: string;
+  notes?: string;
+  lat?: number;
+  lon?: number;
+  submittedAt: string;
+  status: "pending" | "approved" | "rejected";
+}
+
+export interface Confirmation {
+  restaurantId: string;
+  confirmedAt: string;
+  note?: string;
 }
 
 export interface OverpassElement {
